@@ -57,6 +57,7 @@ jobs:
             echo "build_tools=$(y .build.build_tools)"
             echo "release_dir=src/$(dirname "$glob")"
             echo "artifact_name=$(y .artifact.name)"
+            echo "expect_package=$(y '.artifact.expect_package // ""')"
             echo "note=$(y '.telegram.note // ""')"
             echo "max_mb=$mm"
           } >> "$GITHUB_OUTPUT"
@@ -131,8 +132,18 @@ jobs:
           ARTIFACT_NAME: ${{ steps.cfg.outputs.artifact_name }}
           BUILD_TOOLS: ${{ steps.cfg.outputs.build_tools }}
           BUILD_REF: ${{ inputs.build_ref }}
+          EXPECT_PACKAGE: ${{ steps.cfg.outputs.expect_package }}
         run: |
           "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --print-certs "$SIGNED"
+          if [[ -n "$EXPECT_PACKAGE" ]]; then    # гейт: не тот applicationId — в канал не едет
+            PKG=$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt2" dump badging "$SIGNED" \
+              | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+            if [[ "$PKG" != "$EXPECT_PACKAGE" ]]; then
+              echo "::error::applicationId '$PKG' != ожидаемого '$EXPECT_PACKAGE' — доставка отменена"
+              exit 1
+            fi
+            echo "applicationId OK: $PKG"
+          fi
           VERSION=$(jq -r '.elements[0].versionName // empty' "$RELEASE_DIR/output-metadata.json" 2>/dev/null || true)
           if [[ -z "$VERSION" ]]; then   # не все gradle-задачи пишут output-metadata.json
             VERSION=$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt2" dump badging "$SIGNED" 2>/dev/null \

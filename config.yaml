@@ -11,7 +11,7 @@ repos:
     display: NewPipe
     platform: android                    # -> .github/workflows/build-android.yml
     trigger:
-      mode: release
+      mode: branch
       branch: dev
     build:
       java: "21"
@@ -27,6 +27,7 @@ repos:
     artifact:
       glob: "app/build/outputs/apk/release/*.apk"
       name: "NewPipe-{version}-{sha7}.apk"
+      expect_package: "org.schabi.newpipe.my"    # гейт: доставка только при точном applicationId
     telegram: {}
 
   - name: bitchat-android
@@ -59,6 +60,7 @@ repos:
     artifact:
       glob: "app/build/outputs/apk/release/*.apk"
       name: "bitchat-android-{version}-{sha7}.apk"
+      expect_package: "com.bitchat.droid.my"     # гейт: доставка только при точном applicationId
     telegram:
       max_direct_mb: 49        # универсальный APK ~46 МБ — чуть выше общего порога 45
 
