@@ -70,7 +70,7 @@ repos:
     platform: macos                      # -> .github/workflows/build-macos.yml
     paused: true
     trigger:
-      mode: branch
+      mode: release
       branch: main
     build:
       xcode: "26"                        # glob /Applications/Xcode_26*.app, берётся новейший
