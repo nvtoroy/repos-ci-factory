@@ -17,7 +17,8 @@ repos:
       gradle_task: ":app:assembleRelease"
       # {date} -> UTC yyyymmdd, {datehour} -> UTC yyyymmddHH (монотонный versionCode)
       gradle_args: "-DpackageSuffix=ci -DversionNameSuffix=-ci-{date} -DversionCodeOverride={datehour}"
-      sdk_packages: ["platforms;android-37", "build-tools;35.0.1"]
+      # платформу (compileSdk) AGP докачивает сам, как в апстрим-CI; ставим только build-tools для подписи
+      sdk_packages: ["build-tools;35.0.1"]
       build_tools: "35.0.1"
     artifact:
       glob: "app/build/outputs/apk/release/*.apk"
