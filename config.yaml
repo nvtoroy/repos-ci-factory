@@ -62,6 +62,7 @@ repos:
     repo: permissionlesstech/bitchat
     display: bitchat
     platform: macos                      # -> .github/workflows/build-macos.yml
+    paused: true
     trigger:
       mode: branch
       branch: main
