@@ -35,7 +35,7 @@ repos:
     display: bitchat (Android)
     platform: android
     trigger:
-      mode: branch
+      mode: release
       branch: main
     build:
       java: "17"
