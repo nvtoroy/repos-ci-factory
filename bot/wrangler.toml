@@ -1,0 +1,9 @@
+name = "repos-ci-factory-bot"
+main = "src/index.js"
+compatibility_date = "2026-07-01"
+
+# Секреты (ставятся через `npx wrangler secret put <NAME>`):
+#   TELEGRAM_BOT_TOKEN — токен бота
+#   GITHUB_TOKEN       — fine-grained PAT: только repos-ci-factory, Contents RW + Actions RW
+#   ALLOWED_USER_ID    — ваш Telegram user id (бот отвечает только вам)
+#   WEBHOOK_SECRET     — случайная строка, защищает webhook и /setup

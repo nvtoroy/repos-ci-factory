@@ -25,6 +25,12 @@ for i in $(seq 0 $((n - 1))); do
   mode=$(yq ".repos[$i].trigger.mode" config.yaml)
   branch=$(yq ".repos[$i].trigger.branch // \"\"" config.yaml)
   platform=$(yq ".repos[$i].platform" config.yaml)
+  paused=$(yq ".repos[$i].paused // false" config.yaml)
+
+  if [[ "$paused" == "true" ]]; then
+    echo "$name: на паузе, пропускаю"
+    continue
+  fi
 
   if ! current=$(resolve "$slug" "$mode" "$branch") || [[ -z "$current" ]]; then
     echo "::warning::$name: не удалось получить текущий ref, пропускаю"

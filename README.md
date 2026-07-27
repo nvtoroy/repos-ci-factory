@@ -62,6 +62,20 @@ gh workflow run check.yml -R nvtoroy/repos-ci-factory -f force=myapp
 - re-run упавшего запуска в Actions (подхватит исправления config.yaml — factory чекаутится с `main`), или
 - `gh workflow run check.yml -f force=<name>` — пересборка текущего HEAD.
 
+## Управление через Telegram-бота
+
+В [bot/](bot/) — Cloudflare Worker: тот же бот, что шлёт артефакты, принимает команды в личке
+(`/list`, `/add`, `/build`, `/schedule`, кнопочные меню по каждому репо: пересборка, пауза,
+ветка, триггер, удаление). Бот правит config.yaml и check.yml через GitHub API — фабрика об
+этом ничего не знает. Отвечает только владельцу (`ALLOWED_USER_ID`).
+
+Деплой: `cd bot && npx wrangler deploy`, секреты — `npx wrangler secret put <NAME>` (список в
+[wrangler.toml](bot/wrangler.toml)), затем один раз `curl "https://<worker-url>/setup?key=<WEBHOOK_SECRET>"`
+(регистрирует webhook и команды).
+
+⚠️ Бот редактирует config.yaml простыми текстовыми операциями и рассчитывает на канонический
+формат блоков (`  - name:` с отступом в 2 пробела). Правя файл руками, сохраняйте формат.
+
 ## Обслуживание
 
 - **Расписание**: строка `cron` в [check.yml](.github/workflows/check.yml).
