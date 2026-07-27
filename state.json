@@ -1,1 +1,12 @@
-{}
+{
+  "newpipe": {
+    "last": "98843e5dc5f4a6ca6b44ceaa0b7184cd4da1622a",
+    "prev": "",
+    "dispatched_at": "2026-07-27T00:23:01Z"
+  },
+  "bitchat": {
+    "last": "0152196ac2648ef3f6a1bbab4f24f1a88e11b3b2",
+    "prev": "",
+    "dispatched_at": "2026-07-27T00:23:02Z"
+  }
+}
