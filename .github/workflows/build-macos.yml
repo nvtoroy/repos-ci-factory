@@ -1,0 +1,192 @@
+name: build-macos
+run-name: "macos · ${{ inputs.name }} @ ${{ inputs.build_ref }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Имя репо из config.yaml'
+        required: true
+        type: string
+      build_ref:
+        description: 'SHA коммита или тег апстрима'
+        required: true
+        type: string
+      prev_ref:
+        description: 'Предыдущий собранный ref (для compare-ссылки)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write                # release-fallback для артефактов больше лимита Telegram
+
+concurrency:
+  group: build-${{ inputs.name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-26            # НЕ macos-latest: latest уедет на macOS 27 / Xcode 27
+    timeout-minutes: 90
+    steps:
+      - name: Checkout factory
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: factory
+          ref: main              # re-run подхватывает исправления конфига
+          persist-credentials: false
+
+      - name: Load repo config
+        id: cfg
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          y() { yq ".repos[] | select(.name == \"$NAME\") | $1" factory/config.yaml; }
+          mm=$(y '.telegram.max_direct_mb // ""')
+          [[ -z "$mm" ]] && mm=$(yq '.defaults.max_direct_mb // 45' factory/config.yaml)
+          {
+            echo "slug=$(y .repo)"
+            echo "display=$(y .display)"
+            echo "branch=$(y '.trigger.branch // ""')"
+            echo "xcode=$(y '.build.xcode // "26"')"
+            echo "project=$(y .build.project)"
+            echo "scheme=$(y .build.scheme)"
+            echo "configuration=$(y '.build.configuration // "Release"')"
+            echo "archs=$(y '.build.archs // "arm64 x86_64"')"
+            echo "product=$(y .build.product)"
+            echo "artifact_name=$(y .artifact.name)"
+            echo "note=$(y '.telegram.note // ""')"
+            echo "max_mb=$mm"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout upstream
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.cfg.outputs.slug }}
+          ref: ${{ inputs.build_ref }}
+          path: src
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Commit metadata
+        id: meta
+        run: |
+          subject=$(git -C src log -1 --format=%s 2>/dev/null | head -c 200 || true)
+          echo "subject=$subject" >> "$GITHUB_OUTPUT"
+
+      - name: Select Xcode
+        env:
+          XCODE_VER: ${{ steps.cfg.outputs.xcode }}
+        run: |
+          XC=$(ls -d /Applications/Xcode_${XCODE_VER}*.app 2>/dev/null | sort -V | tail -1)
+          if [[ -z "$XC" ]]; then
+            echo "::error::Нет Xcode ${XCODE_VER}.x на образе. Доступны:"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          sudo xcode-select -s "$XC/Contents/Developer"
+          xcodebuild -version
+
+      - name: SPM cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: src/SourcePackages
+          key: spm-${{ inputs.name }}-${{ hashFiles('src/**/Package.resolved') }}
+          restore-keys: spm-${{ inputs.name }}-
+
+      - name: Build (unsigned, как в апстрим-CI)
+        working-directory: src
+        env:
+          PROJECT: ${{ steps.cfg.outputs.project }}
+          SCHEME: ${{ steps.cfg.outputs.scheme }}
+          CONFIGURATION: ${{ steps.cfg.outputs.configuration }}
+          ARCHS_LIST: ${{ steps.cfg.outputs.archs }}
+        run: |
+          set -o pipefail
+          xcodebuild -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration "$CONFIGURATION" \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath SourcePackages \
+            ARCHS="$ARCHS_LIST" ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO build
+
+      - name: Ad-hoc sign with trimmed entitlements
+        env:
+          NAME: ${{ inputs.name }}
+          CONFIGURATION: ${{ steps.cfg.outputs.configuration }}
+          PRODUCT: ${{ steps.cfg.outputs.product }}
+        run: |
+          APP="src/build/Build/Products/$CONFIGURATION/$PRODUCT"
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+            echo '<plist version="1.0"><dict>'
+            yq ".repos[] | select(.name == \"$NAME\") | .build.entitlements_keep[]" factory/config.yaml \
+              | while read -r k; do printf '  <key>%s</key><true/>\n' "$k"; done
+            echo '</dict></plist>'
+          } > entitlements.plist
+          cat entitlements.plist
+          # app-groups выброшен намеренно: без Apple-аккаунта группа невалидна под ad-hoc подписью.
+          # Если вылезут проблемы вложенной подписи: подписать Contents/Frameworks/* по одному, затем app без --deep.
+          codesign --force --deep --sign - --entitlements entitlements.plist "$APP"
+          codesign --verify --deep --strict "$APP"
+          codesign -d --entitlements - "$APP"
+
+      - name: Package
+        id: art
+        env:
+          CONFIGURATION: ${{ steps.cfg.outputs.configuration }}
+          PRODUCT: ${{ steps.cfg.outputs.product }}
+          ARTIFACT_NAME: ${{ steps.cfg.outputs.artifact_name }}
+          BUILD_REF: ${{ inputs.build_ref }}
+        run: |
+          APP="src/build/Build/Products/$CONFIGURATION/$PRODUCT"
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")
+          SHA7=${BUILD_REF:0:7}
+          OUT=$(sed -e "s/{version}/$VERSION/" -e "s/{sha7}/$SHA7/" <<< "$ARTIFACT_NAME")
+          mkdir -p dist
+          ditto -c -k --keepParent "$APP" "dist/$OUT"
+          { echo "file=dist/$OUT"; echo "version=$VERSION"; } >> "$GITHUB_OUTPUT"
+
+      - name: Send to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ inputs.name }}
+          DISPLAY: ${{ steps.cfg.outputs.display }}
+          PLATFORM: macos
+          SLUG: ${{ steps.cfg.outputs.slug }}
+          BRANCH: ${{ steps.cfg.outputs.branch }}
+          BUILD_REF: ${{ inputs.build_ref }}
+          PREV_REF: ${{ inputs.prev_ref }}
+          VERSION: ${{ steps.art.outputs.version }}
+          SUBJECT: ${{ steps.meta.outputs.subject }}
+          NOTE: ${{ steps.cfg.outputs.note }}
+          MAX_DIRECT_MB: ${{ steps.cfg.outputs.max_mb }}
+        run: ./factory/scripts/tg_send.sh "${{ steps.art.outputs.file }}"
+
+      - name: Keep artifact for debugging
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.name }}-${{ inputs.build_ref }}
+          path: dist/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Notify failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NAME: ${{ inputs.name }}
+          DISPLAY: ${{ steps.cfg.outputs.display }}
+          PLATFORM: macos
+          BRANCH: ${{ steps.cfg.outputs.branch }}
+          BUILD_REF: ${{ inputs.build_ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: ./factory/scripts/tg_notify_failure.sh

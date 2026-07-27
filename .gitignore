@@ -1,0 +1,4 @@
+*.jks
+*.keystore
+.secrets.env
+.DS_Store

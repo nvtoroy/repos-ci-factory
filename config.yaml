@@ -1,0 +1,49 @@
+# CI-фабрика: отслеживаемые репозитории.
+# Добавить репозиторий = добавить блок в `repos:`. Сборка произойдёт на следующем
+# дневном тике check.yml (или сразу: gh workflow run check.yml -f force=<name>).
+defaults:
+  max_direct_mb: 45          # артефакт больше этого — уходит в GitHub Release, в канал ссылка
+
+repos:
+  - name: newpipe                        # ключ в state.json и в force=
+    repo: TeamNewPipe/NewPipe
+    display: NewPipe
+    platform: android                    # -> .github/workflows/build-android.yml
+    trigger:
+      mode: branch                       # branch | release | tag
+      branch: dev
+    build:
+      java: "21"
+      gradle_task: ":app:assembleRelease"
+      # {date} -> UTC yyyymmdd, {datehour} -> UTC yyyymmddHH (монотонный versionCode)
+      gradle_args: "-DpackageSuffix=ci -DversionNameSuffix=-ci-{date} -DversionCodeOverride={datehour}"
+      sdk_packages: ["platforms;android-37", "build-tools;35.0.1"]
+      build_tools: "35.0.1"
+    artifact:
+      glob: "app/build/outputs/apk/release/*.apk"
+      name: "NewPipe-{version}-{sha7}.apk"
+    telegram: {}
+
+  - name: bitchat
+    repo: permissionlesstech/bitchat
+    display: bitchat
+    platform: macos                      # -> .github/workflows/build-macos.yml
+    trigger:
+      mode: branch
+      branch: main
+    build:
+      xcode: "26"                        # glob /Applications/Xcode_26*.app, берётся новейший
+      project: bitchat.xcodeproj
+      scheme: "bitchat (macOS)"
+      configuration: Release
+      archs: "arm64 x86_64"
+      product: bitchat.app
+      entitlements_keep:                 # ad-hoc подпись: app-groups выброшен намеренно
+        - com.apple.security.app-sandbox
+        - com.apple.security.network.client
+        - com.apple.security.network.server
+        - com.apple.security.device.bluetooth
+    artifact:
+      name: "bitchat-macos-{version}-{sha7}.zip"
+    telegram:
+      note: "Первый запуск: правый клик -> Открыть (или: xattr -d com.apple.quarantine bitchat.app)"

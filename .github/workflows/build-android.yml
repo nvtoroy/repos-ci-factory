@@ -1,0 +1,167 @@
+name: build-android
+run-name: "android · ${{ inputs.name }} @ ${{ inputs.build_ref }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: 'Имя репо из config.yaml'
+        required: true
+        type: string
+      build_ref:
+        description: 'SHA коммита или тег апстрима'
+        required: true
+        type: string
+      prev_ref:
+        description: 'Предыдущий собранный ref (для compare-ссылки)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write                # release-fallback для артефактов больше лимита Telegram
+
+concurrency:
+  group: build-${{ inputs.name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout factory
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: factory
+          ref: main              # re-run подхватывает исправления конфига
+          persist-credentials: false
+
+      - name: Load repo config
+        id: cfg
+        env:
+          NAME: ${{ inputs.name }}
+        run: |
+          y() { yq ".repos[] | select(.name == \"$NAME\") | $1" factory/config.yaml; }
+          glob=$(y .artifact.glob)
+          mm=$(y '.telegram.max_direct_mb // ""')
+          [[ -z "$mm" ]] && mm=$(yq '.defaults.max_direct_mb // 45' factory/config.yaml)
+          {
+            echo "slug=$(y .repo)"
+            echo "display=$(y .display)"
+            echo "branch=$(y '.trigger.branch // ""')"
+            echo "java=$(y '.build.java // "21"')"
+            echo "gradle_task=$(y .build.gradle_task)"
+            echo "gradle_args=$(y '.build.gradle_args // ""')"
+            echo "sdk_packages=$(y '.build.sdk_packages // [] | join(" ")')"
+            echo "build_tools=$(y .build.build_tools)"
+            echo "release_dir=src/$(dirname "$glob")"
+            echo "artifact_name=$(y .artifact.name)"
+            echo "note=$(y '.telegram.note // ""')"
+            echo "max_mb=$mm"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout upstream
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.cfg.outputs.slug }}
+          ref: ${{ inputs.build_ref }}
+          path: src
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Re-attach branch name           # detached HEAD меняет applicationId у NewPipe
+        if: steps.cfg.outputs.branch != ''
+        run: git -C src checkout -B "${{ steps.cfg.outputs.branch }}"
+
+      - name: Commit metadata
+        id: meta
+        run: |
+          subject=$(git -C src log -1 --format=%s 2>/dev/null | head -c 200 || true)
+          echo "subject=$subject" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: ${{ steps.cfg.outputs.java }}
+          cache: gradle
+
+      - name: Ensure SDK packages
+        if: steps.cfg.outputs.sdk_packages != ''
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ${{ steps.cfg.outputs.sdk_packages }} > /dev/null
+
+      - name: Build
+        working-directory: src
+        env:
+          GRADLE_TASK: ${{ steps.cfg.outputs.gradle_task }}
+          GRADLE_ARGS: ${{ steps.cfg.outputs.gradle_args }}
+        run: |
+          ARGS=$(sed -e "s/{date}/$(date -u +%Y%m%d)/g" -e "s/{datehour}/$(date -u +%Y%m%d%H)/g" <<< "$GRADLE_ARGS")
+          ./gradlew "$GRADLE_TASK" --stacktrace $ARGS
+
+      - name: Sign
+        id: sign
+        uses: ilharp/sign-android-release@13dd52242698526f951aa8bb8696204f6fea702a # v2.0.0
+        with:
+          releaseDir: ${{ steps.cfg.outputs.release_dir }}
+          signingKey: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          keyAlias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          buildToolsVersion: ${{ steps.cfg.outputs.build_tools }}
+
+      - name: Verify, name, stage
+        id: art
+        env:
+          SIGNED: ${{ steps.sign.outputs.signedFile }}
+          RELEASE_DIR: ${{ steps.cfg.outputs.release_dir }}
+          ARTIFACT_NAME: ${{ steps.cfg.outputs.artifact_name }}
+          BUILD_TOOLS: ${{ steps.cfg.outputs.build_tools }}
+          BUILD_REF: ${{ inputs.build_ref }}
+        run: |
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --print-certs "$SIGNED"
+          VERSION=$(jq -r '.elements[0].versionName' "$RELEASE_DIR/output-metadata.json")
+          SHA7=${BUILD_REF:0:7}
+          OUT=$(sed -e "s/{version}/$VERSION/" -e "s/{sha7}/$SHA7/" <<< "$ARTIFACT_NAME")
+          mkdir -p dist && cp "$SIGNED" "dist/$OUT"
+          { echo "file=dist/$OUT"; echo "version=$VERSION"; } >> "$GITHUB_OUTPUT"
+
+      - name: Send to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_TOKEN: ${{ github.token }}
+          NAME: ${{ inputs.name }}
+          DISPLAY: ${{ steps.cfg.outputs.display }}
+          PLATFORM: android
+          SLUG: ${{ steps.cfg.outputs.slug }}
+          BRANCH: ${{ steps.cfg.outputs.branch }}
+          BUILD_REF: ${{ inputs.build_ref }}
+          PREV_REF: ${{ inputs.prev_ref }}
+          VERSION: ${{ steps.art.outputs.version }}
+          SUBJECT: ${{ steps.meta.outputs.subject }}
+          NOTE: ${{ steps.cfg.outputs.note }}
+          MAX_DIRECT_MB: ${{ steps.cfg.outputs.max_mb }}
+        run: ./factory/scripts/tg_send.sh "${{ steps.art.outputs.file }}"
+
+      - name: Keep artifact for debugging
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.name }}-${{ inputs.build_ref }}
+          path: dist/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Notify failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NAME: ${{ inputs.name }}
+          DISPLAY: ${{ steps.cfg.outputs.display }}
+          PLATFORM: android
+          BRANCH: ${{ steps.cfg.outputs.branch }}
+          BUILD_REF: ${{ inputs.build_ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: ./factory/scripts/tg_notify_failure.sh

@@ -1,0 +1,35 @@
+name: check
+run-name: "check${{ inputs.force && format(' · force: {0}', inputs.force) || '' }}"
+
+on:
+  schedule:
+    - cron: '7 5 * * *'          # ежедневно ~05:07 UTC (минута смещена от перегруженной :00)
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Пересобрать независимо от state: имена через запятую или "all"'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write                # коммит state.json
+  actions: write                 # gh workflow run build-*.yml
+
+concurrency:
+  group: check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0         # надёжный pull --rebase при гонке пушей
+      - name: Detect updates, dispatch builds, commit state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+        run: ./scripts/check_updates.sh
