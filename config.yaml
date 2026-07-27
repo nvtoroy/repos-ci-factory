@@ -11,7 +11,7 @@ repos:
     display: NewPipe
     platform: android                    # -> .github/workflows/build-android.yml
     trigger:
-      mode: branch
+      mode: release
       branch: dev
     build:
       java: "21"
