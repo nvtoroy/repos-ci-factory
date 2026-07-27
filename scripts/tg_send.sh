@@ -33,7 +33,9 @@ CAPTION=${CAPTION//\{sha7\}/$SHA7}
 CAPTION=${CAPTION//\{subject\}/$SUBJ}
 CAPTION=${CAPTION//\{compare_url\}/$COMPARE_URL}
 CAPTION=${CAPTION//\{run_url\}/$RUN_URL}
-CAPTION=${CAPTION//\{note\}/$([[ -n "${NOTE:-}" ]] && printf '⚠️ %s' "$(printf '%s' "$NOTE" | esc)")}
+NOTE_LINE=""
+if [[ -n "${NOTE:-}" ]]; then NOTE_LINE="⚠️ $(printf '%s' "$NOTE" | esc)"; fi
+CAPTION=${CAPTION//\{note\}/$NOTE_LINE}
 CAPTION=$(printf '%s' "$CAPTION" | sed '/^[[:space:]]*$/d')   # пустые строки от незаполненных плейсхолдеров
 
 size=$(wc -c < "$FILE")
