@@ -43,6 +43,9 @@ repos:
       pre_build: |
         sed -i -E 's/versionCode = [0-9]+/versionCode = {datehour}/' app/build.gradle.kts
         sed -i -E 's/versionName = "([^"]+)"/versionName = "\1-my-{date}"/' app/build.gradle.kts
+        # фикс краша на старте: R8 на их main срезает конструктор WorkDatabase_Impl
+        # (регрессия после бампа AGP 9.3.1; их CI приложение не запускает и не видит этого)
+        echo '-keep class * extends androidx.room.RoomDatabase { <init>(); }' >> app/proguard-rules.pro
       sdk_packages: ["build-tools;35.0.1"]
       build_tools: "35.0.1"
     artifact:
