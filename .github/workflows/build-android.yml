@@ -88,7 +88,12 @@ jobs:
 
       - name: Ensure SDK packages
         if: steps.cfg.outputs.sdk_packages != ''
-        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ${{ steps.cfg.outputs.sdk_packages }} > /dev/null
+        env:
+          SDK_PACKAGES: ${{ steps.cfg.outputs.sdk_packages }}
+        run: |
+          for p in $SDK_PACKAGES; do                # ID пакетов содержат ';' — только по одному и в кавычках
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$p" > /dev/null
+          done
 
       - name: Build
         working-directory: src
