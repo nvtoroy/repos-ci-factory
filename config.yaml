@@ -17,6 +17,9 @@ repos:
       gradle_task: ":app:assembleRelease"
       # {date} -> UTC yyyymmdd, {datehour} -> UTC yyyymmddHH (монотонный versionCode)
       gradle_args: "-DpackageSuffix=my -DversionNameSuffix=-my-{date} -DversionCodeOverride={datehour}"
+      # апстрим формирует имя "NewPipe $suffix" (с пробелом) — убираем пробел: "NewPipe.my"
+      pre_build: |
+        sed -i 's/NewPipe $suffix/NewPipe.$suffix/' app/build.gradle.kts
       # платформу (compileSdk) AGP докачивает сам, как в апстрим-CI; ставим только build-tools для подписи
       sdk_packages: ["build-tools;35.0.1"]
       build_tools: "35.0.1"
