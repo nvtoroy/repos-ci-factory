@@ -98,10 +98,18 @@ jobs:
       - name: Build
         working-directory: src
         env:
+          NAME: ${{ inputs.name }}
           GRADLE_TASK: ${{ steps.cfg.outputs.gradle_task }}
           GRADLE_ARGS: ${{ steps.cfg.outputs.gradle_args }}
         run: |
-          ARGS=$(sed -e "s/{date}/$(date -u +%Y%m%d)/g" -e "s/{datehour}/$(date -u +%Y%m%d%H)/g" <<< "$GRADLE_ARGS")
+          sub() { sed -e "s/{date}/$(date -u +%Y%m%d)/g" -e "s/{datehour}/$(date -u +%Y%m%d%H)/g"; }
+          PRE=$(yq ".repos[] | select(.name == \"$NAME\") | .build.pre_build // \"\"" ../factory/config.yaml | sub)
+          if [[ -n "$PRE" ]]; then
+            echo "pre_build:"; echo "$PRE"
+            bash -euo pipefail -c "$PRE"
+          fi
+          [ -x ./gradlew ] || chmod +x ./gradlew
+          ARGS=$(sub <<< "$GRADLE_ARGS")
           ./gradlew "$GRADLE_TASK" --stacktrace $ARGS
 
       - name: Sign
@@ -125,7 +133,12 @@ jobs:
           BUILD_REF: ${{ inputs.build_ref }}
         run: |
           "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --print-certs "$SIGNED"
-          VERSION=$(jq -r '.elements[0].versionName' "$RELEASE_DIR/output-metadata.json")
+          VERSION=$(jq -r '.elements[0].versionName // empty' "$RELEASE_DIR/output-metadata.json" 2>/dev/null || true)
+          if [[ -z "$VERSION" ]]; then   # не все gradle-задачи пишут output-metadata.json
+            VERSION=$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt2" dump badging "$SIGNED" 2>/dev/null \
+              | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" | head -1)
+            VERSION=${VERSION:-unknown}
+          fi
           SHA7=${BUILD_REF:0:7}
           OUT=$(sed -e "s/{version}/$VERSION/" -e "s/{sha7}/$SHA7/" <<< "$ARTIFACT_NAME")
           mkdir -p dist && cp "$SIGNED" "dist/$OUT"
