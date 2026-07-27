@@ -2,3 +2,4 @@
 *.keystore
 .secrets.env
 .DS_Store
+.gstack/
