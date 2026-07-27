@@ -3,7 +3,7 @@ run-name: "check${{ inputs.force && format(' · force: {0}', inputs.force) || ''
 
 on:
   schedule:
-    - cron: '7 5 * * *'          # ежедневно ~05:07 UTC (минута смещена от перегруженной :00)
+    - cron: '17 17 * * 6'          # ежедневно ~05:07 UTC (минута смещена от перегруженной :00)
   workflow_dispatch:
     inputs:
       force:
