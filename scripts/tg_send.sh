@@ -14,13 +14,27 @@ esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
 SHA7=${BUILD_REF:0:7}
 SUBJ=$(printf '%s' "${SUBJECT:-}" | head -c 160 | esc)
 
-CAPTION="📦 <b>$(printf '%s' "$DISPLAY" | esc)</b> · ${PLATFORM} · ${VERSION}
-<code>${BRANCH:-tag} @ ${SHA7}</code> ${SUBJ}"
-if [[ -n "${PREV_REF:-}" ]]; then
-  CAPTION+=$'\n'"Изменения: https://github.com/${SLUG}/compare/${PREV_REF:0:12}...${BUILD_REF:0:12}"
+# Подпись собирается из шаблона repos[].telegram.caption (config.yaml).
+# Плейсхолдеры: {display} {platform} {version} {branch} {sha7} {subject} {compare_url} {run_url} {note}
+TPL=$(yq ".repos[] | select(.name == \"${NAME}\") | .telegram.caption // \"\"" factory/config.yaml 2>/dev/null || true)
+if [[ -z "$TPL" ]]; then
+  TPL=$'📦 <b>{display}</b> {version}\n{note}'
 fi
-CAPTION+=$'\n'"Лог: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-[[ -n "${NOTE:-}" ]] && CAPTION+=$'\n'"⚠️ $(printf '%s' "$NOTE" | esc)"
+COMPARE_URL=""
+[[ -n "${PREV_REF:-}" ]] && COMPARE_URL="https://github.com/${SLUG}/compare/${PREV_REF:0:12}...${BUILD_REF:0:12}"
+RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+CAPTION=$TPL
+CAPTION=${CAPTION//\{display\}/$(printf '%s' "$DISPLAY" | esc)}
+CAPTION=${CAPTION//\{platform\}/$PLATFORM}
+CAPTION=${CAPTION//\{version\}/$(printf '%s' "$VERSION" | esc)}
+CAPTION=${CAPTION//\{branch\}/$(printf '%s' "${BRANCH:-}" | esc)}
+CAPTION=${CAPTION//\{sha7\}/$SHA7}
+CAPTION=${CAPTION//\{subject\}/$SUBJ}
+CAPTION=${CAPTION//\{compare_url\}/$COMPARE_URL}
+CAPTION=${CAPTION//\{run_url\}/$RUN_URL}
+CAPTION=${CAPTION//\{note\}/$([[ -n "${NOTE:-}" ]] && printf '⚠️ %s' "$(printf '%s' "$NOTE" | esc)")}
+CAPTION=$(printf '%s' "$CAPTION" | sed '/^[[:space:]]*$/d')   # пустые строки от незаполненных плейсхолдеров
 
 size=$(wc -c < "$FILE")
 max=$(( ${MAX_DIRECT_MB:-45} * 1024 * 1024 ))

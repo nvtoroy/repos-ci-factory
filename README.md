@@ -54,6 +54,22 @@ gh workflow run check.yml -R nvtoroy/repos-ci-factory -f force=myapp
 Сделайте резервную копию. Потеря ключа разорвёт цепочку обновлений APK (новые сборки перестанут
 ставиться поверх старых без удаления).
 
+## Формат сообщения в канале
+
+По умолчанию подпись артефакта минимальная: `📦 <Имя> <версия>` (+ примечание, если задано).
+Свой формат — поле `telegram.caption` у репозитория в config.yaml (HTML Telegram), плейсхолдеры:
+`{display} {platform} {version} {branch} {sha7} {subject} {compare_url} {run_url} {note}`.
+
+```yaml
+    telegram:
+      caption: |
+        📦 <b>{display}</b> {version}
+        Что нового: {subject}
+```
+
+Сообщения об ошибках сборки уходят владельцу в личку от бота (секрет `TELEGRAM_ADMIN_CHAT_ID`),
+в канал они не попадают.
+
 ## Семантика ретраев
 
 `state.json` фиксирует SHA **в момент dispatch**. Упавшая сборка не ретраится автоматически на том
